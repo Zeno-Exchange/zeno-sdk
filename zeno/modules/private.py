@@ -2,7 +2,6 @@ from eth_abi.packed import encode_packed
 from eth_keys import keys
 from web3 import Web3, Account
 from web3.middleware.signing import construct_sign_and_send_raw_middleware
-from web3.logs import DISCARD
 from zeno.constants.contracts import (
   CROSS_MARGIN_HANDLER_ABI_PATH,
   LIMIT_TRADE_HANDLER_ABI_PATH,
@@ -15,7 +14,6 @@ from zeno.constants.contracts import (
 from zeno.constants.common import (
   ADDRESS_ZERO,
   DAYS,
-  MAX_UINT,
   EXECUTION_FEE,
   BPS,
   MAX_UINT54,
@@ -23,9 +21,6 @@ from zeno.constants.common import (
 )
 from zeno.constants.intent import (
   INTENT_TRADE_API,
-)
-from zeno.enum import (
-  Cmd,
 )
 from eth_account import Account
 
@@ -41,7 +36,6 @@ from zeno.helpers.mapper import (
 )
 from zeno.helpers.util import check_sub_account_id_param, from_number_to_e30, int_to_byte32
 from zeno.modules.oracle.oracle_middleware import OracleMiddleware
-from eth_abi.abi import encode
 import decimal
 import math
 import requests as r
@@ -111,8 +105,9 @@ class Private(object):
     allowance = token_instance.functions.allowance(
         self.eth_signer.address, CROSS_MARGIN_HANDLER_ADDRESS).call()
     if allowance < amount_wei:
-      resp = token_instance.functions.approve(
+      tx = token_instance.functions.approve(
           CROSS_MARGIN_HANDLER_ADDRESS, amount_wei).transact({"from": self.eth_signer.address, "gasPrice": self.eth_provider.eth.gas_price})
+      self.eth_provider.eth.wait_for_transaction_receipt(tx)
 
     return self.cross_margin_handler_instance.functions.depositCollateral(
       sub_account_id,
@@ -247,70 +242,6 @@ class Private(object):
 
   def __sub_slippage(self, value: float):
     return decimal.Decimal(value) * (BPS - 25) / BPS
-
-  def __create_order_batch(self, account: str, sub_account_id: int, orders):
-    (cmds, datas) = self.__prepare_batch_input(orders)
-    return self.limit_trade_handler_instance.functions.batch(
-      account,
-      sub_account_id,
-      cmds,
-      datas
-    ).transact({"from": self.eth_signer.address, "value": EXECUTION_FEE * cmds.count(Cmd.CREATE)})
-
-  def __prepare_batch_input(self, orders):
-    return ([order["cmd"] for order in orders], [self.__prepare_order_call_data(order) for order in orders])
-
-  def __prepare_order_call_data(self, order):
-    if order["cmd"] == Cmd.CREATE:
-      return self.__prepare_create_order_call_data(
-        order["market_index"],
-        order["size_delta"],
-        order["trigger_price"],
-        order["acceptable_price"],
-        order["trigger_above_threshold"],
-        order["execution_fee"],
-        order["reduce_only"],
-        order["tp_token"]
-      )
-    if order["cmd"] == Cmd.UPDATE:
-      return self.__prepare_update_order_call_data(
-        order["order_index"],
-        order["size_delta"],
-        order["trigger_price"],
-        order["acceptable_price"],
-        order["trigger_above_threshold"],
-        order["reduce_only"],
-        order["tp_token"]
-      )
-    if order["cmd"] == Cmd.CANCEL:
-      return self.__prepare_cancel_order_call_data(order["order_index"])
-
-  def __prepare_create_order_call_data(self, market_index: int, size_delta: float, trigger_price: float, acceptable_price: float, trigger_above_threshold: bool, execution_fee: float, reduce_only: bool, tp_token: str):
-    return encode(
-      ["uint256", "int256", "uint256", "uint256",
-       "bool", "uint256", "bool", "address"],
-      [market_index, size_delta, trigger_price, acceptable_price,
-       trigger_above_threshold, execution_fee, reduce_only, tp_token]
-    )
-
-  def __prepare_update_order_call_data(self, order_index: int, size_delta: float, trigger_price: float, acceptable_price: float, trigger_above_threshold: bool, reduce_only: bool, tp_token: str):
-    return encode(
-      ["uint256", "int256", "uint256", "uint256",
-       "bool", "bool", "address"],
-      [order_index, size_delta, trigger_price, acceptable_price,
-       trigger_above_threshold, reduce_only, tp_token]
-    )
-
-  def __prepare_cancel_order_call_data(self, order_index: int):
-    return encode(
-      ["uint256"],
-      [order_index]
-    )
-
-  def __parse_log(self, tx, topic):
-    receipt = self.eth_provider.eth.get_transaction_receipt(tx)
-    return self.limit_trade_handler_instance.events[topic](
-      ).process_receipt(receipt, DISCARD)
 
   def __create_intent_trigger_order(self, sub_account_id: int, market_index: int, buy: bool, size: float, trigger_price: float, trigger_above_threshold: bool, reduce_only: bool, expire_time: int, tp_token: str = ADDRESS_ZERO):
     created_timestamp = math.floor(time())
