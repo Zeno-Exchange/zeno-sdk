@@ -63,7 +63,7 @@ from zeno.constants.assets import (
   ASSET_mUSDC,
   ASSET_mUSDT,
 )
-DEFAULT_PYTH_PRICE_SERVICE_URL = "https://hermes.pyth.network"
+DEFAULT_PYTH_PRICE_SERVICE_URL = "https://oracle-public-api.hmx.org"
 
 
 GET_LATEST_PRICE_FEEDS_ENDPOINT = "api/latest_price_feeds"
